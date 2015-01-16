@@ -1,5 +1,6 @@
 # Name: Nikoula, Latifah & Nikos
 # Date: 13 January 2015
+# Assignment 7 : Advance Raster
 
 rm(list=ls()) # clear the workspace
 
@@ -12,7 +13,13 @@ source("R/rmse.R")
 library(raster)
 
 # load the data
-list<-list.files ('data/', pattern = glob2rx('*.rda'), full.names = TRUE)
+load("data/GewataB1.rda")
+load("data/GewataB2.rda")
+load("data/GewataB3.rda")
+load("data/GewataB4.rda")
+load("data/GewataB5.rda")
+load("data/GewataB7.rda")
+load("data/vcfGewata.rda")
 load ('data/trainingPoly.rda')
 
 # process the input data for further analyses
@@ -25,57 +32,63 @@ landsatvcf <-  addLayer(landsat,vcfGewata)
 names(landsatvcf) <- c("band1", "band2", "band3", "band4",  "band5", "band7", "vcf")
 landsatvcf
 
-# extract the values into a data frame
-valuetable <- getValues(landsatvcf)
-valuetable <- na.omit(valuetable)
-valuetable <- as.data.frame(valuetable)
+# creating data frame from landsat vcf raster
+value <- getValues(landsatvcf)
+value <- na.omit (value)
+valuedf <- as.data.frame (value)
 
 # Creating linear regression model
-model <- lm(vcf ~ band1 + band2 + band3 + band4 + band5 + band7, valuetable)
+model <- lm(vcf ~ band1 + band2+ band3 + band4 + band5 + band7, valuedf)
 summary(model) # show results
-coef(model) # extract the model's coefficients
-layout(matrix(1:4,2,2)) 
-plot(model)
 
-##layout(matrix(1:4,2,2)) 
-##plot(model)
+# new model by eliminating band 7 (because it does'nt have significant influence in vcf)
+model <- lm(vcf ~ band1 + band2+ band3 + band4 + band5, valuedf)
+summary(model) # show results
 
-# predict vdf values based on the developed regression model
-landsatvcfPred <- predict(landsatvcf, model)
-names(vcf.predict.raster) <- "vcf"
+# predict vcf values based on the developed regression model
+vcfPredR <- predict(landsatvcf, model)
+names(vcfPredR) <- "vcfPred"
 
-#make the data frame
-vcf.predict <- predict(model, valuetable)
-vcf.predict.df<-as.data.frame(vcf.predict)
+# make data frame
+vcfPred <- predict(model, valuedf)
+vcfPreddf <- as.data.frame (vcfPred)
+head (vcfPred) # inspect data
+head (vcfPreddf) # inspect data
 
-summary(vcf.predict.df)
+# add the predicted value data frame
+# allvcfdf <- cbind(valuedf, vcfPreddf) # if we want to combine all the df
+# head (allvcfdf)
 
 # plot the predicted tree cover raster and compare with the original VCF raster.
 p1=spplot(landsatvcf$vcf, zcol = 'vcf',col.regions = colorRampPalette(c("lightblue","green", "yellow","red"))(100), main= "Original VCF tree cover")
-p2=spplot(vcf.predict.raster, zcol = 'vcf',col.regions = colorRampPalette(c("lightblue","green", "yellow","red"))(100), main= "Predicted VCF tree cover")
+p2=spplot(vcfPredR, zcol = 'vcfPred',col.regions = colorRampPalette(c("lightblue","green", "yellow","red"))(100), main= "Predicted VCF tree cover")
 print(p1, position = c(0,.5,.5,1),more=T)
 print(p2, position = c(.5,.5,1,1),more = T)
 
 # Compute the root mean squared error (data frames)
-rmse <- rmse(valuetable$vcf,vcf.predict)
+rmse <- rmse(valuedf$vcf, vcfPreddf)
 print(paste("The rmse is equal to",rmse ))
 
-# assign class in trainingPoly
-trainingPoly@data$Code <- as.numeric(trainingPoly@data$Class)
+# calculate rmse per layer using trainingPoly
+## combine vcf and vcf predict raster data
+vcfbrick<-brick(landsatvcf$vcf,vcfPredR)
 
-# assign 'Code' values to raster cells (where they overlap)
-classActual <- rasterize(trainingPoly, landsatvcf, field='Code')
-classPred <- rasterize(trainingPoly, landsatvcfPred, field='Code')
+## rasterize the training area polygon
+## assign classes based on training area 
+classes <- rasterize(trainingPoly, vcfbrick, field='Class')
+plot (classes) #inspect the result 
 
-# mask the raster
-actual <- mask(landsatvcf, )
+# calculate the mean for each classes
+zonal<-zonal(vcfbrick,classes, mean)
+zonaldf<-as.data.frame(zonal)
+head(zonaldf) # inspect the data
 
-# calculate the RMSE separately for each of the classes and compare
-# provide classification using random forest
-plot(trainingPoly)
-str(trainingPoly)
+# call function
+source("R/rmse.R")
 
+# zone correspons to: cropland, forest, wetland
+rmseCrop <- rmse(zonaldf[1,2], zonaldf[1,3])
+rmseForest <- rmse(zonaldf [2,2], zonaldf[2,3])
+rmseWetland <- rmse(zonaldf [3,2], zonaldf[3,3])
 
-classes <- rasterize(trainingPoly, vcf.predict.raster, field='Code')
-
-zonal(vcf.predict.raster, trainingPoly)
+print(paste("The rmse is", rmseCrop, "for crop, ", rmseForest, "for Forest, and", rmseWetland, "for wetland."))
